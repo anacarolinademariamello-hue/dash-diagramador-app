@@ -265,8 +265,8 @@ def add_gabarito_table(doc, gabarito, n_blocos=5):
 
         for i, numero in enumerate(chunk):
             c1, c2 = nested.cell(i, 0), nested.cell(i, 1)
-            set_cell_text(c1, str(numero), size=10)
-            set_cell_text(c2, gabarito[numero], size=10)
+            set_cell_text(c1, str(numero), bold=True, size=10)
+            set_cell_text(c2, gabarito[numero], bold=True, size=10)
             if i % 2 == 1:
                 shade_cell(c1, "EFEFEF")
                 shade_cell(c2, "EFEFEF")
