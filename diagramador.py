@@ -43,6 +43,12 @@ GAB_COMENTADO_Q_RE = re.compile(
 )
 BLOCO_RE = re.compile(r"^BLOCO\s+(\d+)", re.IGNORECASE)
 GABARITO_HEAD_RE = re.compile(r"^GABARITO COMENTADO", re.IGNORECASE)
+REVISAO_START_RE = re.compile(r"^Revis(?:ã|a)o de 24 horas$", re.IGNORECASE)
+META_GENERICA_RE = re.compile(r"^Meta\s+\d+\s*[—–\-]", re.IGNORECASE)
+META_REVISAO_RE = re.compile(r"^Meta de Revis(?:ã|a)o", re.IGNORECASE)
+GABARITO_DIVIDER_RE = re.compile(r"^[━_\-\s]*GABARITO[━_\-\s]*$", re.IGNORECASE)
+ALT_SPLIT_RE = re.compile(r"\s(?=[A-E]\)\s)")
+AZUL_CAIXA = "D9EEFB"  # fundo azul claro da caixa de revisao (ajustavel)
 
 
 def shade_paragraph(paragraph, fill_hex):
@@ -225,6 +231,73 @@ def set_cell_text(cell, text, bold=False, size=10, color=None):
         r.font.color.rgb = color
 
 
+def split_question(text):
+    """Quando a questao e as alternativas A-E vem todas coladas num so
+    paragrafo (sem quebra de linha), separa em (numero, enunciado, [(letra, texto), ...])."""
+    m = QUESTAO_RE.match(text)
+    if not m:
+        return None
+    numero, resto = m.groups()
+    partes = ALT_SPLIT_RE.split(resto)
+    enunciado = partes[0].strip()
+    alternativas = []
+    for chunk in partes[1:]:
+        am = ALT_RE.match(chunk.strip())
+        if am:
+            alternativas.append(am.groups())
+    return numero, enunciado, alternativas
+
+
+def start_revisao_box(doc, titulo_box):
+    """Cria a caixa de fundo azul claro da secao 'Revisao de 24 horas'
+    e devolve a celula onde o conteudo deve ser escrito."""
+    doc.add_paragraph()
+    table = doc.add_table(rows=1, cols=1)
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    cell = table.rows[0].cells[0]
+    cell.width = Cm(17)
+    shade_cell(cell, AZUL_CAIXA)
+
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(titulo_box)
+    r.bold = True
+    r.font.size = Pt(12)
+    r.font.color.rgb = AZUL
+    return cell
+
+
+def add_centered_bold_line(container, text, size=11):
+    p = container.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(text)
+    r.bold = True
+    r.font.size = Pt(size)
+    r.font.color.rgb = AZUL
+
+
+def add_question_block(container, numero, enunciado, alternativas):
+    np = container.add_paragraph()
+    np.paragraph_format.space_before = Pt(12)
+    np.paragraph_format.space_after = Pt(4)
+    r1 = np.add_run(f"Questão {numero}")
+    r1.bold = True
+    r1.font.size = Pt(11)
+    r1.add_break(WD_BREAK.LINE)
+    r2 = np.add_run(enunciado)
+    r2.font.size = Pt(11)
+
+    for letra, texto in alternativas:
+        ap = container.add_paragraph()
+        ap.paragraph_format.left_indent = Cm(0.6)
+        ap.paragraph_format.space_after = Pt(2)
+        ar1 = ap.add_run(f"{letra}) ")
+        ar1.bold = True
+        ar1.font.size = Pt(10.5)
+        ar2 = ap.add_run(texto)
+        ar2.font.size = Pt(10.5)
+
+
 def add_gabarito_table(doc, gabarito, n_blocos=5):
     if not gabarito:
         return
@@ -305,6 +378,9 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
 
     skip_first_lines = 2
     count_skipped = 0
+    target = doc
+    in_revisao_box = False
+
     for text in original_paragraph_texts:
         text = text.strip()
 
@@ -313,6 +389,30 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
             continue
 
         if not text:
+            continue
+
+        if REVISAO_START_RE.match(text):
+            target = start_revisao_box(doc, text)
+            in_revisao_box = True
+            continue
+
+        if in_revisao_box and GABARITO_DIVIDER_RE.match(text):
+            target = doc
+            in_revisao_box = False
+            doc.add_page_break()
+            h = doc.add_heading("GABARITO COMENTADO", level=2)
+            style_runs(h, bold=True, size=13, color=AZUL)
+            continue
+
+        if in_revisao_box:
+            if META_REVISAO_RE.match(text) or META_GENERICA_RE.match(text):
+                add_centered_bold_line(target, text)
+                continue
+            q = split_question(text)
+            if q:
+                add_question_block(target, *q)
+                continue
+            target.add_paragraph(text)
             continue
 
         bloco_m = BLOCO_RE.match(text)
