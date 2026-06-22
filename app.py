@@ -7,12 +7,13 @@ st.set_page_config(page_title="Diagramador de Simulados", page_icon="📄", layo
 st.title("📄 Diagramador de Simulados")
 st.write(
     "Envie o arquivo Word **cru** (sem diagramação) e baixe a versão já formatada: "
-    "o cabeçalho/rodapé originais do arquivo (banner e logo) são preservados, uma faixa "
-    "azul com o título da matéria é adicionada repetindo em todas as páginas, as questões "
-    "e alternativas ficam em destaque, e o Gabarito Simplificado é gerado automaticamente."
+    "o documento sai com o cabeçalho e rodapé padrão (banner, foto e ícones), título "
+    "da matéria atualizado automaticamente, questões e alternativas em destaque, "
+    "seções de revisão/gabarito comentado com fundo azul, e o Gabarito Simplificado "
+    "gerado automaticamente."
 )
 
-with st.expander("⚙️ Personalizar título da faixa azul (opcional)"):
+with st.expander("⚙️ Personalizar título do cabeçalho (opcional)"):
     titulo_custom = st.text_input("Título (deixe vazio para detectar automaticamente)")
     subtitulo_custom = st.text_input("Ementa / subtítulo (opcional)")
 

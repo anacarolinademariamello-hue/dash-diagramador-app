@@ -1,40 +1,31 @@
 """
 Diagramador de simulados (Word -> layout final)
 ================================================
-Le um .docx "cru" (conteudo certo, sem diagramacao) e devolve o MESMO
-documento com:
-  - cabecalho/rodape ORIGINAIS preservados (banner, logo e credito que
-    ja vem prontos no arquivo cru) -- nada e recriado do zero;
-  - uma faixa azul extra no cabecalho com o titulo da materia e a ementa,
-    repetindo em todas as paginas (isso elimina a colagem manual);
-  - "Questao N" em negrito numa linha e o enunciado na linha de baixo;
-  - alternativas A-E com a letra em negrito;
-  - tabela de Gabarito Simplificado gerada automaticamente a partir do
-    gabarito comentado.
+Le um .docx "cru" (conteudo certo, sem diagramacao) e devolve um novo
+documento construido a partir do TEMPLATE_BASE (assets/template_base.docx)
+-- um arquivo que ja tem o cabecalho/rodape com a arte definitiva (caixa
+flutuante com titulo/ementa + foto + icones), feito direto no Word.
+Nunca recriamos cabecalho/rodape via codigo; so trocamos o texto do
+titulo/ementa dentro da caixa flutuante do cabecalho e escrevemos o
+corpo (blocos, questoes, alternativas, gabarito) do zero.
 """
 
-import io
 import os
 import re
 from docx import Document
-from docx.shared import Pt, Cm, Emu, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
+from docx.shared import Pt, Cm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 AZUL = RGBColor(0x1F, 0x3B, 0x57)
 AZUL_TITULO = RGBColor(0x12, 0x3D, 0x6B)
-AZUL_FAIXA = "1C5FA8"   # cor da barra de credito (ajustavel)
 CINZA = RGBColor(0x44, 0x44, 0x44)
 BRANCO = RGBColor(0xFF, 0xFF, 0xFF)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
-ICON_WHATSAPP = os.path.join(ASSETS_DIR, "whatsapp.png")
-ICON_INSTAGRAM = os.path.join(ASSETS_DIR, "instagram.png")
-CREDITO_ESQ = "O Concursado de hoje é o Concurseiro que nunca desistiu!"
-CREDITO_DIR_PRE = "Lista de transmissão do whatsapp "
-CREDITO_DIR_POS = " @professorfrancelino"
+TEMPLATE_BASE = os.path.join(ASSETS_DIR, "template_base.docx")
 
 QUESTAO_RE = re.compile(r"^Quest(?:ã|a)o\s+(\d+)\b\s*(.*)$", re.IGNORECASE)
 ALT_RE = re.compile(r"^([A-E])\)\s*(.*)$")
@@ -73,116 +64,41 @@ def style_runs(paragraph, bold=False, size=11, color=None, italic=False):
             run.font.color.rgb = color
 
 
-def extract_header_image(header):
-    """Pega os bytes da imagem do banner ja embutida no cabecalho original."""
-    for rel in header.part.rels.values():
-        if "image" in rel.reltype:
-            return rel.target_part.blob
-    return None
+def set_textbox_paragraph_text(paragraph_el, new_text):
+    """Troca o texto de um <w:p> mantendo a formatacao do 1o run
+    (fonte, tamanho, cor, negrito) -- usado dentro das caixas flutuantes
+    do cabecalho, que python-docx nao expoe via paragraphs normal."""
+    runs = paragraph_el.findall(qn("w:r"))
+    if not runs:
+        return
+    first_run = runs[0]
+    t_elements = first_run.findall(qn("w:t"))
+    if t_elements:
+        t_elements[0].text = new_text
+        for extra_t in t_elements[1:]:
+            first_run.remove(extra_t)
+    else:
+        t = OxmlElement("w:t")
+        t.set(qn("xml:space"), "preserve")
+        t.text = new_text
+        first_run.append(t)
+    for r in runs[1:]:
+        r.getparent().remove(r)
 
 
-def remove_image_paragraphs(header):
-    """Remove do cabecalho os paragrafos que contem a imagem/divisoria,
-    mantendo a linha de credito do topo intacta."""
-    for p in list(header.paragraphs):
-        if p._p.findall(qn("w:r") + "/" + qn("w:drawing")) or p.text.strip().startswith("___"):
-            p._p.getparent().remove(p._p)
-        elif any(run._r.find(qn("w:drawing")) is not None for run in p.runs):
-            p._p.getparent().remove(p._p)
-
-
-def clear_container_paragraphs(container):
-    """Remove TODOS os paragrafos/tabelas de um header ou footer."""
-    body = container._element
-    for child in list(body):
-        if child.tag in (qn("w:p"), qn("w:tbl")):
-            body.remove(child)
-    # garante que sempre exista pelo menos 1 paragrafo (exigencia do formato)
-    if not container.paragraphs:
-        container.add_paragraph()
-
-
-def add_tab(paragraph):
-    run = paragraph.add_run()
-    run._r.append(OxmlElement("w:tab"))
-    return run
-
-
-def add_credit_band(container):
-    """Cria a barra azul de credito (texto + icones), usada no topo do
-    cabecalho e no rodape. Usa UM paragrafo so com parada de tabulacao
-    a direita -- e assim que o Word monta esse tipo de linha nativamente,
-    evita o problema de tabela "solta" sem paragrafo depois dela."""
-    clear_container_paragraphs(container)
-
-    p = container.paragraphs[0]
-    shade_paragraph(p, AZUL_FAIXA)
-    p.paragraph_format.space_before = Pt(3)
-    p.paragraph_format.space_after = Pt(3)
-    p.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
-
-    r1 = p.add_run(CREDITO_ESQ)
-    r1.bold = True
-    r1.font.size = Pt(9)
-    r1.font.color.rgb = BRANCO
-
-    add_tab(p)
-
-    r2 = p.add_run(CREDITO_DIR_PRE)
-    r2.bold = True
-    r2.font.size = Pt(9)
-    r2.font.color.rgb = BRANCO
-
-    if os.path.exists(ICON_WHATSAPP):
-        r2.add_picture(ICON_WHATSAPP, height=Cm(0.35))
-
-    r3 = p.add_run(" | ")
-    r3.bold = True
-    r3.font.size = Pt(9)
-    r3.font.color.rgb = BRANCO
-
-    if os.path.exists(ICON_INSTAGRAM):
-        r3.add_picture(ICON_INSTAGRAM, height=Cm(0.35))
-
-    r4 = p.add_run(CREDITO_DIR_POS)
-    r4.bold = True
-    r4.font.size = Pt(9)
-    r4.font.color.rgb = BRANCO
-
-
-def add_title_band(header, titulo, ementa, image_bytes):
-    """Adiciona uma tabela com a imagem do banner a esquerda e o
-    titulo/ementa a direita, igual a arte do template."""
-    table = header.add_table(rows=1, cols=2, width=Cm(17))
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = False
-    left_cell, right_cell = table.rows[0].cells
-    left_cell.width = Cm(6)
-    right_cell.width = Cm(11)
-
-    left_p = left_cell.paragraphs[0]
-    left_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if image_bytes:
-        run = left_p.add_run()
-        run.add_picture(io.BytesIO(image_bytes), width=Cm(5.8))
-
-    rp1 = right_cell.paragraphs[0]
-    rp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r1 = rp1.add_run(titulo)
-    r1.bold = True
-    r1.font.size = Pt(13)
-    r1.font.color.rgb = AZUL_TITULO
-
-    rp2 = right_cell.add_paragraph()
-    rp2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    r2 = rp2.add_run(ementa)
-    r2.bold = True
-    r2.font.size = Pt(10)
-    r2.font.color.rgb = AZUL_TITULO
-
-    # Word exige um paragrafo "normal" apos a ultima tabela em header/footer,
-    # senao esse bloco nao e reconhecido como cabecalho nativo.
-    header.add_paragraph()
+def update_header_title(doc, titulo, ementa):
+    """Atualiza o titulo/ementa dentro da caixa flutuante azul do
+    cabecalho do TEMPLATE_BASE. Existem 2 copias do mesmo texto no XML
+    (uma para o Word moderno, outra de fallback para versoes antigas) --
+    as duas precisam ser atualizadas para ficarem consistentes."""
+    header_el = doc.sections[0].header._element
+    boxes = header_el.findall(".//" + qn("w:txbxContent"))
+    for box in boxes:
+        paragraphs = box.findall(qn("w:p"))
+        if len(paragraphs) >= 1:
+            set_textbox_paragraph_text(paragraphs[0], titulo)
+        if len(paragraphs) >= 2:
+            set_textbox_paragraph_text(paragraphs[1], ementa)
 
 
 def clear_body(doc):
@@ -409,26 +325,20 @@ def add_gabarito_table(doc, gabarito, n_blocos=5):
 def diagramar(input_stream, titulo=None, subtitulo=None):
     """Recebe um stream (BytesIO) do docx cru e devolve (Document, n_gabarito).
 
-    O documento devolvido E O PROPRIO ARQUIVO DE ENTRADA com o corpo
-    reescrito -- por isso o cabecalho/rodape originais (banner, logo,
-    credito) sao preservados automaticamente."""
-    doc = Document(input_stream)
+    O documento devolvido E O TEMPLATE_BASE (cabecalho/rodape com a arte
+    definitiva, feita no Word) com o corpo preenchido a partir do
+    conteudo do arquivo cru."""
+    raw = Document(input_stream)
 
-    all_texts = [p.text.strip() for p in doc.paragraphs]
+    all_texts = [p.text.strip() for p in raw.paragraphs]
     non_empty = [t for t in all_texts if t]
     titulo = titulo or (non_empty[0] if len(non_empty) > 0 else "")
     subtitulo = subtitulo or (non_empty[1] if len(non_empty) > 1 else "")
 
-    # paragrafos originais (texto) antes de apagar o corpo
     original_paragraph_texts = all_texts
 
-    header = doc.sections[0].header
-    footer = doc.sections[0].footer
-    image_bytes = extract_header_image(header)
-
-    add_credit_band(header)
-    add_title_band(header, titulo, subtitulo, image_bytes)
-    add_credit_band(footer)
+    doc = Document(TEMPLATE_BASE)
+    update_header_title(doc, titulo, subtitulo)
 
     gabarito = extract_gabarito(original_paragraph_texts)
 
