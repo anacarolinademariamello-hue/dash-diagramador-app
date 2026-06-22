@@ -8,21 +8,31 @@ flutuante com titulo/ementa + foto + icones), feito direto no Word.
 Nunca recriamos cabecalho/rodape via codigo; so trocamos o texto do
 titulo/ementa dentro da caixa flutuante do cabecalho e escrevemos o
 corpo (blocos, questoes, alternativas, gabarito) do zero.
+
+Padrao de estilo do corpo:
+  - fonte Avenir Book, 12pt no texto corrido, 13.5pt cor #014391 nos titulos;
+  - texto justificado; alternativas com o mesmo recuo do enunciado (sem recuo extra);
+  - letras das alternativas sem negrito;
+  - espacamento entre linhas multiplo de 1.16;
+  - fundo azul claro SO na secao "Revisao de 24 horas".
 """
 
 import os
 import re
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
-AZUL = RGBColor(0x1F, 0x3B, 0x57)
-AZUL_TITULO = RGBColor(0x12, 0x3D, 0x6B)
-CINZA = RGBColor(0x44, 0x44, 0x44)
-BRANCO = RGBColor(0xFF, 0xFF, 0xFF)
+FONT_NAME = "Avenir Book"
+FONT_SIZE = Pt(12)
+TITLE_SIZE = Pt(13.5)
+TITLE_COLOR = RGBColor(0x01, 0x43, 0x91)
+LINE_SPACING = 1.16
+
+AZUL_CAIXA = "D9EEFB"  # fundo azul claro da caixa de revisao (ajustavel)
 
 ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
 TEMPLATE_BASE = os.path.join(ASSETS_DIR, "template_base.docx")
@@ -43,25 +53,50 @@ META_GENERICA_RE = re.compile(r"^Meta\s+\d+\s*[—–\-]", re.IGNORECASE)
 META_REVISAO_RE = re.compile(r"^Meta de Revis(?:ã|a)o", re.IGNORECASE)
 GABARITO_DIVIDER_RE = re.compile(r"^[━_\-\s]*GABARITO[━_\-\s]*$", re.IGNORECASE)
 ALT_SPLIT_RE = re.compile(r"\s(?=[A-E]\)\s)")
-AZUL_CAIXA = "D9EEFB"  # fundo azul claro da caixa de revisao (ajustavel)
 
 
-def shade_paragraph(paragraph, fill_hex):
-    pPr = paragraph._p.get_or_add_pPr()
-    shd = OxmlElement("w:shd")
-    shd.set(qn("w:val"), "clear")
-    shd.set(qn("w:color"), "auto")
-    shd.set(qn("w:fill"), fill_hex)
-    pPr.append(shd)
+def format_paragraph(p, justify=True, space_before=None, space_after=4):
+    pf = p.paragraph_format
+    pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
+    pf.line_spacing = LINE_SPACING
+    if space_before is not None:
+        pf.space_before = Pt(space_before)
+    if space_after is not None:
+        pf.space_after = Pt(space_after)
+    if justify:
+        p.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    return p
 
 
-def style_runs(paragraph, bold=False, size=11, color=None, italic=False):
-    for run in paragraph.runs:
-        run.bold = bold
-        run.italic = italic
-        run.font.size = Pt(size)
+def style_run(run, bold=False, title=False, color=None, size=None):
+    run.font.name = FONT_NAME
+    run.bold = bold
+    if title:
+        run.font.size = size or TITLE_SIZE
+        run.font.color.rgb = color or TITLE_COLOR
+    else:
+        run.font.size = size or FONT_SIZE
         if color:
             run.font.color.rgb = color
+
+
+def add_body_paragraph(container, text=None, justify=True, space_before=None, space_after=4):
+    p = container.add_paragraph()
+    format_paragraph(p, justify=justify, space_before=space_before, space_after=space_after)
+    if text:
+        r = p.add_run(text)
+        style_run(r)
+    return p
+
+
+def add_title_paragraph(container, text, justify=False, align_center=False, space_before=None, space_after=6):
+    p = container.add_paragraph()
+    format_paragraph(p, justify=justify, space_before=space_before, space_after=space_after)
+    if align_center:
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run(text)
+    style_run(r, bold=True, title=True)
+    return p
 
 
 def set_textbox_paragraph_text(paragraph_el, new_text):
@@ -145,6 +180,7 @@ def set_cell_text(cell, text, bold=False, size=10, color=None):
     p.paragraph_format.space_before = Pt(1)
     p.paragraph_format.space_after = Pt(1)
     r = p.add_run(text)
+    r.font.name = FONT_NAME
     r.bold = bold
     r.font.size = Pt(size)
     if color:
@@ -168,10 +204,10 @@ def split_question(text):
     return numero, enunciado, alternativas
 
 
-def start_blue_box(doc, titulo_box, titulo_size=12):
-    """Cria uma caixa de fundo azul claro (usada na 'Revisao de 24 horas'
-    e em todos os Gabaritos Comentados) e devolve a celula onde o
-    conteudo deve ser escrito."""
+def start_revisao_box(doc, titulo_box):
+    """Cria a caixa de fundo azul claro da secao 'Revisao de 24 horas'
+    -- a UNICA parte do documento com fundo azul -- e devolve a celula
+    onde o conteudo deve ser escrito."""
     doc.add_paragraph()
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -180,12 +216,30 @@ def start_blue_box(doc, titulo_box, titulo_size=12):
     shade_cell(cell, AZUL_CAIXA)
 
     p = cell.paragraphs[0]
+    format_paragraph(p, justify=False, space_after=6)
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run(titulo_box)
-    r.bold = True
-    r.font.size = Pt(titulo_size)
-    r.font.color.rgb = AZUL
+    style_run(r, bold=True, title=True)
     return cell
+
+
+def add_question_paragraph(container, numero, enunciado):
+    np = add_body_paragraph(container, space_before=12, space_after=4)
+    r1 = np.add_run(f"Questão {numero}")
+    style_run(r1, bold=True)
+    r1.add_break(WD_BREAK.LINE)
+    r2 = np.add_run(enunciado)
+    style_run(r2)
+    return np
+
+
+def add_alternativa_paragraph(container, letra, texto):
+    ap = add_body_paragraph(container, space_after=2)
+    r1 = ap.add_run(f"{letra}) ")
+    style_run(r1, bold=False)
+    r2 = ap.add_run(texto)
+    style_run(r2, bold=False)
+    return ap
 
 
 def add_gabarito_comentado_line(container, text):
@@ -198,87 +252,44 @@ def add_gabarito_comentado_line(container, text):
     gt_m = GAB_TITLE_RE.match(text)
     if gt_m:
         titulo, resto = gt_m.groups()
-        tp = container.add_paragraph()
-        tp.paragraph_format.space_before = Pt(10)
-        tp.paragraph_format.space_after = Pt(3)
+        tp = add_body_paragraph(container, space_before=10, space_after=3)
         tr = tp.add_run(titulo)
-        tr.bold = True
-        tr.font.size = Pt(11)
+        style_run(tr, bold=True)
 
         resto = resto.strip()
         if resto:
             am = ALT_RE.match(resto)
             if am:
                 letra, alt_texto = am.groups()
-                ap = container.add_paragraph()
-                ap.paragraph_format.left_indent = Cm(0.6)
-                ap.paragraph_format.space_after = Pt(2)
-                ar1 = ap.add_run(f"{letra}) ")
-                ar1.bold = True
-                ar1.font.size = Pt(10.5)
-                ar2 = ap.add_run(alt_texto)
-                ar2.font.size = Pt(10.5)
+                add_alternativa_paragraph(container, letra, alt_texto)
             else:
-                container.add_paragraph(resto)
+                add_body_paragraph(container, resto)
         return
 
     alt_m = ALT_RE.match(text)
     if alt_m:
         letra, alt_texto = alt_m.groups()
-        ap = container.add_paragraph()
-        ap.paragraph_format.left_indent = Cm(0.6)
-        ap.paragraph_format.space_after = Pt(2)
-        ar1 = ap.add_run(f"{letra}) ")
-        ar1.bold = True
-        ar1.font.size = Pt(10.5)
-        ar2 = ap.add_run(alt_texto)
-        ar2.font.size = Pt(10.5)
+        add_alternativa_paragraph(container, letra, alt_texto)
         return
 
-    np = container.add_paragraph(text)
-    np.paragraph_format.space_after = Pt(4)
-    style_runs(np, size=10)
+    add_body_paragraph(container, text)
 
 
-def add_centered_bold_line(container, text, size=11):
-    p = container.add_paragraph()
-    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    r = p.add_run(text)
-    r.bold = True
-    r.font.size = Pt(size)
-    r.font.color.rgb = AZUL
+def add_centered_title_line(container, text):
+    add_title_paragraph(container, text, justify=False, align_center=True, space_after=6)
 
 
 def add_question_block(container, numero, enunciado, alternativas):
-    np = container.add_paragraph()
-    np.paragraph_format.space_before = Pt(12)
-    np.paragraph_format.space_after = Pt(4)
-    r1 = np.add_run(f"Questão {numero}")
-    r1.bold = True
-    r1.font.size = Pt(11)
-    r1.add_break(WD_BREAK.LINE)
-    r2 = np.add_run(enunciado)
-    r2.font.size = Pt(11)
-
+    add_question_paragraph(container, numero, enunciado)
     for letra, texto in alternativas:
-        ap = container.add_paragraph()
-        ap.paragraph_format.left_indent = Cm(0.6)
-        ap.paragraph_format.space_after = Pt(2)
-        ar1 = ap.add_run(f"{letra}) ")
-        ar1.bold = True
-        ar1.font.size = Pt(10.5)
-        ar2 = ap.add_run(texto)
-        ar2.font.size = Pt(10.5)
+        add_alternativa_paragraph(container, letra, texto)
 
 
 def add_gabarito_table(doc, gabarito, n_blocos=5):
     if not gabarito:
         return
     doc.add_page_break()
-    h = doc.add_heading("GABARITO SIMPLIFICADO", level=2)
-    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    style_runs(h, bold=True, size=14, color=AZUL)
-    doc.add_paragraph()
+    h = add_title_paragraph(doc, "GABARITO SIMPLIFICADO", align_center=True, space_after=10)
 
     numeros = sorted(gabarito.keys())
     total = len(numeros)
@@ -297,9 +308,7 @@ def add_gabarito_table(doc, gabarito, n_blocos=5):
         hp = cell.paragraphs[0]
         hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
         hr = hp.add_run(f"Bloco {b + 1}")
-        hr.bold = True
-        hr.font.size = Pt(11)
-        hr.font.color.rgb = AZUL
+        style_run(hr, bold=True, title=True, size=Pt(11))
 
         chunk = chunks[b]
         if not chunk:
@@ -360,24 +369,26 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
             continue
 
         if REVISAO_START_RE.match(text):
-            target = start_blue_box(doc, text)
+            target = start_revisao_box(doc, text)
             box_mode = "revisao"
             continue
 
         if box_mode == "revisao" and GABARITO_DIVIDER_RE.match(text):
-            target = start_blue_box(doc, "GABARITO COMENTADO", titulo_size=13)
+            target = doc
             box_mode = "gabarito"
+            doc.add_page_break()
+            add_title_paragraph(doc, "GABARITO COMENTADO")
             continue
 
         if box_mode == "revisao":
             if META_REVISAO_RE.match(text) or META_GENERICA_RE.match(text):
-                add_centered_bold_line(target, text)
+                add_centered_title_line(target, text)
                 continue
             q = split_question(text)
             if q:
                 add_question_block(target, *q)
                 continue
-            target.add_paragraph(text)
+            add_body_paragraph(target, text)
             continue
 
         bloco_m = BLOCO_RE.match(text)
@@ -387,13 +398,14 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
             box_mode = None
             target = doc
             doc.add_page_break()
-            h = doc.add_heading(text, level=1)
-            style_runs(h, bold=True, size=14, color=AZUL)
+            add_title_paragraph(doc, text)
             continue
 
         if gab_head_m:
-            target = start_blue_box(doc, text, titulo_size=13)
             box_mode = "gabarito"
+            target = doc
+            doc.add_page_break()
+            add_title_paragraph(doc, text)
             continue
 
         if box_mode == "gabarito":
@@ -405,32 +417,15 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
 
         if questao_m:
             numero, resto = questao_m.groups()
-            np = doc.add_paragraph()
-            np.paragraph_format.space_before = Pt(12)
-            np.paragraph_format.space_after = Pt(4)
-            r1 = np.add_run(f"Questão {numero}")
-            r1.bold = True
-            r1.font.size = Pt(11)
-            r1.add_break(WD_BREAK.LINE)
-            r2 = np.add_run(resto)
-            r2.font.size = Pt(11)
+            add_question_paragraph(doc, numero, resto)
             continue
 
         if alt_m:
-            np = doc.add_paragraph()
-            np.paragraph_format.left_indent = Cm(0.6)
-            np.paragraph_format.space_after = Pt(2)
             letra, resto = alt_m.groups()
-            r1 = np.add_run(f"{letra}) ")
-            r1.bold = True
-            r1.font.size = Pt(10.5)
-            r2 = np.add_run(resto)
-            r2.font.size = Pt(10.5)
+            add_alternativa_paragraph(doc, letra, resto)
             continue
 
-        np = doc.add_paragraph(text)
-        np.paragraph_format.space_after = Pt(4)
-        style_runs(np, size=10.5)
+        add_body_paragraph(doc, text)
 
     add_gabarito_table(doc, gabarito)
 
