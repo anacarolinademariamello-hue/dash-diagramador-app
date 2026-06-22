@@ -192,33 +192,87 @@ def extract_gabarito(paragraphs):
     return gabarito
 
 
+def set_table_no_borders(table):
+    tbl = table._tbl
+    tblPr = tbl.tblPr
+    borders = OxmlElement("w:tblBorders")
+    for edge in ("top", "left", "bottom", "right", "insideH", "insideV"):
+        el = OxmlElement(f"w:{edge}")
+        el.set(qn("w:val"), "nil")
+        borders.append(el)
+    tblPr.append(borders)
+
+
+def shade_cell(cell, fill_hex):
+    tcPr = cell._tc.get_or_add_tcPr()
+    shd = OxmlElement("w:shd")
+    shd.set(qn("w:val"), "clear")
+    shd.set(qn("w:color"), "auto")
+    shd.set(qn("w:fill"), fill_hex)
+    tcPr.append(shd)
+
+
+def set_cell_text(cell, text, bold=False, size=10, color=None):
+    cell.text = ""
+    p = cell.paragraphs[0]
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    p.paragraph_format.space_before = Pt(1)
+    p.paragraph_format.space_after = Pt(1)
+    r = p.add_run(text)
+    r.bold = bold
+    r.font.size = Pt(size)
+    if color:
+        r.font.color.rgb = color
+
+
 def add_gabarito_table(doc, gabarito, n_blocos=5):
     if not gabarito:
         return
     doc.add_page_break()
     h = doc.add_heading("GABARITO SIMPLIFICADO", level=2)
+    h.alignment = WD_ALIGN_PARAGRAPH.CENTER
     style_runs(h, bold=True, size=14, color=AZUL)
 
     numeros = sorted(gabarito.keys())
     total = len(numeros)
     por_bloco = -(-total // n_blocos)
-    table = doc.add_table(rows=por_bloco + 1, cols=n_blocos * 2)
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    chunks = [numeros[i * por_bloco:(i + 1) * por_bloco] for i in range(n_blocos)]
+
+    outer = doc.add_table(rows=1, cols=n_blocos)
+    outer.alignment = WD_TABLE_ALIGNMENT.CENTER
+    outer.autofit = False
+    set_table_no_borders(outer)
 
     for b in range(n_blocos):
-        cell = table.cell(0, b * 2)
-        cell.merge(table.cell(0, b * 2 + 1))
-        cell.text = f"Bloco {b + 1}"
-        style_runs(cell.paragraphs[0], bold=True, size=10, color=AZUL)
+        cell = outer.cell(0, b)
+        cell.width = Cm(3.2)
 
-    for idx, n in enumerate(numeros):
-        bloco = idx // por_bloco
-        row = idx % por_bloco + 1
-        table.cell(row, bloco * 2).text = str(n)
-        table.cell(row, bloco * 2 + 1).text = gabarito[n]
-        for c in (table.cell(row, bloco * 2), table.cell(row, bloco * 2 + 1)):
-            c.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
-            style_runs(c.paragraphs[0], size=10)
+        hp = cell.paragraphs[0]
+        hp.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        hr = hp.add_run(f"Bloco {b + 1}")
+        hr.bold = True
+        hr.font.size = Pt(11)
+        hr.font.color.rgb = AZUL
+
+        chunk = chunks[b]
+        if not chunk:
+            continue
+        nested = cell.add_table(rows=len(chunk), cols=2)
+        nested.autofit = False
+        set_table_no_borders(nested)
+        for col in nested.columns:
+            col.width = Cm(1.5)
+
+        for i, numero in enumerate(chunk):
+            c1, c2 = nested.cell(i, 0), nested.cell(i, 1)
+            set_cell_text(c1, str(numero), size=10)
+            set_cell_text(c2, gabarito[numero], size=10)
+            if i % 2 == 1:
+                shade_cell(c1, "EFEFEF")
+                shade_cell(c2, "EFEFEF")
+
+        # paragrafo apos a tabela aninhada (exigencia do formato de tabela)
+        cell.add_paragraph()
 
 
 def diagramar(input_stream, titulo=None, subtitulo=None):
