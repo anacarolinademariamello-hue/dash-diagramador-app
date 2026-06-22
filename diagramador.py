@@ -41,6 +41,10 @@ ALT_RE = re.compile(r"^([A-E])\)\s*(.*)$")
 GAB_COMENTADO_Q_RE = re.compile(
     r"Quest(?:ã|a)o\s+(\d+)\s*[—–\-]\s*Alternativa correta:\s*([A-E])", re.IGNORECASE
 )
+GAB_TITLE_RE = re.compile(
+    r"^(Quest(?:ã|a)o\s+\d+\s*[—–\-]\s*Alternativa correta:\s*[A-E])\s*\*?\s*(.*)$",
+    re.IGNORECASE,
+)
 BLOCO_RE = re.compile(r"^BLOCO\s+(\d+)", re.IGNORECASE)
 GABARITO_HEAD_RE = re.compile(r"^GABARITO COMENTADO", re.IGNORECASE)
 REVISAO_START_RE = re.compile(r"^Revis(?:ã|a)o de 24 horas$", re.IGNORECASE)
@@ -248,9 +252,10 @@ def split_question(text):
     return numero, enunciado, alternativas
 
 
-def start_revisao_box(doc, titulo_box):
-    """Cria a caixa de fundo azul claro da secao 'Revisao de 24 horas'
-    e devolve a celula onde o conteudo deve ser escrito."""
+def start_blue_box(doc, titulo_box, titulo_size=12):
+    """Cria uma caixa de fundo azul claro (usada na 'Revisao de 24 horas'
+    e em todos os Gabaritos Comentados) e devolve a celula onde o
+    conteudo deve ser escrito."""
     doc.add_paragraph()
     table = doc.add_table(rows=1, cols=1)
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
@@ -262,9 +267,61 @@ def start_revisao_box(doc, titulo_box):
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run(titulo_box)
     r.bold = True
-    r.font.size = Pt(12)
+    r.font.size = Pt(titulo_size)
     r.font.color.rgb = AZUL
     return cell
+
+
+def add_gabarito_comentado_line(container, text):
+    """Trata uma linha dentro do Gabarito Comentado. O padrao no arquivo
+    cru e: 'Questao N — Alternativa correta: X * A) <texto da alt A>'
+    (titulo e a 1a alternativa colados no mesmo paragrafo); as demais
+    alternativas (B-E) e a Fundamentacao Legal vem em paragrafos
+    separados. Aqui sempre separamos titulo (negrito) de alternativa
+    (linha propria)."""
+    gt_m = GAB_TITLE_RE.match(text)
+    if gt_m:
+        titulo, resto = gt_m.groups()
+        tp = container.add_paragraph()
+        tp.paragraph_format.space_before = Pt(10)
+        tp.paragraph_format.space_after = Pt(3)
+        tr = tp.add_run(titulo)
+        tr.bold = True
+        tr.font.size = Pt(11)
+
+        resto = resto.strip()
+        if resto:
+            am = ALT_RE.match(resto)
+            if am:
+                letra, alt_texto = am.groups()
+                ap = container.add_paragraph()
+                ap.paragraph_format.left_indent = Cm(0.6)
+                ap.paragraph_format.space_after = Pt(2)
+                ar1 = ap.add_run(f"{letra}) ")
+                ar1.bold = True
+                ar1.font.size = Pt(10.5)
+                ar2 = ap.add_run(alt_texto)
+                ar2.font.size = Pt(10.5)
+            else:
+                container.add_paragraph(resto)
+        return
+
+    alt_m = ALT_RE.match(text)
+    if alt_m:
+        letra, alt_texto = alt_m.groups()
+        ap = container.add_paragraph()
+        ap.paragraph_format.left_indent = Cm(0.6)
+        ap.paragraph_format.space_after = Pt(2)
+        ar1 = ap.add_run(f"{letra}) ")
+        ar1.bold = True
+        ar1.font.size = Pt(10.5)
+        ar2 = ap.add_run(alt_texto)
+        ar2.font.size = Pt(10.5)
+        return
+
+    np = container.add_paragraph(text)
+    np.paragraph_format.space_after = Pt(4)
+    style_runs(np, size=10)
 
 
 def add_centered_bold_line(container, text, size=11):
@@ -305,6 +362,7 @@ def add_gabarito_table(doc, gabarito, n_blocos=5):
     h = doc.add_heading("GABARITO SIMPLIFICADO", level=2)
     h.alignment = WD_ALIGN_PARAGRAPH.CENTER
     style_runs(h, bold=True, size=14, color=AZUL)
+    doc.add_paragraph()
 
     numeros = sorted(gabarito.keys())
     total = len(numeros)
@@ -379,7 +437,7 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
     skip_first_lines = 2
     count_skipped = 0
     target = doc
-    in_revisao_box = False
+    box_mode = None  # None | "revisao" | "gabarito"
 
     for text in original_paragraph_texts:
         text = text.strip()
@@ -392,19 +450,16 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
             continue
 
         if REVISAO_START_RE.match(text):
-            target = start_revisao_box(doc, text)
-            in_revisao_box = True
+            target = start_blue_box(doc, text)
+            box_mode = "revisao"
             continue
 
-        if in_revisao_box and GABARITO_DIVIDER_RE.match(text):
-            target = doc
-            in_revisao_box = False
-            doc.add_page_break()
-            h = doc.add_heading("GABARITO COMENTADO", level=2)
-            style_runs(h, bold=True, size=13, color=AZUL)
+        if box_mode == "revisao" and GABARITO_DIVIDER_RE.match(text):
+            target = start_blue_box(doc, "GABARITO COMENTADO", titulo_size=13)
+            box_mode = "gabarito"
             continue
 
-        if in_revisao_box:
+        if box_mode == "revisao":
             if META_REVISAO_RE.match(text) or META_GENERICA_RE.match(text):
                 add_centered_bold_line(target, text)
                 continue
@@ -417,20 +472,26 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
 
         bloco_m = BLOCO_RE.match(text)
         gab_head_m = GABARITO_HEAD_RE.match(text)
-        questao_m = QUESTAO_RE.match(text)
-        alt_m = ALT_RE.match(text)
 
         if bloco_m:
+            box_mode = None
+            target = doc
             doc.add_page_break()
             h = doc.add_heading(text, level=1)
             style_runs(h, bold=True, size=14, color=AZUL)
             continue
 
         if gab_head_m:
-            doc.add_page_break()
-            h = doc.add_heading(text, level=2)
-            style_runs(h, bold=True, size=13, color=AZUL)
+            target = start_blue_box(doc, text, titulo_size=13)
+            box_mode = "gabarito"
             continue
+
+        if box_mode == "gabarito":
+            add_gabarito_comentado_line(target, text)
+            continue
+
+        questao_m = QUESTAO_RE.match(text)
+        alt_m = ALT_RE.match(text)
 
         if questao_m:
             numero, resto = questao_m.groups()
