@@ -7,17 +7,14 @@ st.set_page_config(page_title="Diagramador de Simulados", page_icon="📄", layo
 st.title("📄 Diagramador de Simulados")
 st.write(
     "Envie o arquivo Word **cru** (sem diagramação) e baixe a versão já formatada: "
-    "cabeçalho fixo, questões e alternativas em destaque, e o Gabarito Simplificado "
-    "gerado automaticamente."
+    "o cabeçalho/rodapé originais do arquivo (banner e logo) são preservados, uma faixa "
+    "azul com o título da matéria é adicionada repetindo em todas as páginas, as questões "
+    "e alternativas ficam em destaque, e o Gabarito Simplificado é gerado automaticamente."
 )
 
-with st.expander("⚙️ Personalizar título / rodapé (opcional)"):
-    titulo_custom = st.text_input("Título do cabeçalho (deixe vazio para detectar automaticamente)")
-    subtitulo_custom = st.text_input("Subtítulo / ementa do cabeçalho (opcional)")
-    rodape_custom = st.text_input(
-        "Texto do rodapé",
-        value="O Concursado de hoje é o Concurseiro que nunca desistiu! Lista de transmissão do whatsapp @professorfrancelino",
-    )
+with st.expander("⚙️ Personalizar título da faixa azul (opcional)"):
+    titulo_custom = st.text_input("Título (deixe vazio para detectar automaticamente)")
+    subtitulo_custom = st.text_input("Ementa / subtítulo (opcional)")
 
 arquivo = st.file_uploader("Arquivo .docx cru", type=["docx"])
 
@@ -29,7 +26,6 @@ if arquivo is not None:
                     arquivo,
                     titulo=titulo_custom or None,
                     subtitulo=subtitulo_custom or None,
-                    rodape=rodape_custom or None,
                 )
                 buffer = io.BytesIO()
                 doc.save(buffer)
