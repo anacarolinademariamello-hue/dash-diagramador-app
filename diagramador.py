@@ -13,17 +13,18 @@ documento com:
     gabarito comentado.
 """
 
+import io
 import re
 from docx import Document
-from docx.shared import Pt, Cm, RGBColor
+from docx.shared import Pt, Cm, Emu, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 
 AZUL = RGBColor(0x1F, 0x3B, 0x57)
+AZUL_TITULO = RGBColor(0x12, 0x3D, 0x6B)
 CINZA = RGBColor(0x44, 0x44, 0x44)
-AZUL_FAIXA = "1483C6"   # cor da faixa do titulo no cabecalho (ajustavel)
 BRANCO = RGBColor(0xFF, 0xFF, 0xFF)
 
 QUESTAO_RE = re.compile(r"^Quest(?:ã|a)o\s+(\d+)\b\s*(.*)$", re.IGNORECASE)
@@ -53,26 +54,55 @@ def style_runs(paragraph, bold=False, size=11, color=None, italic=False):
             run.font.color.rgb = color
 
 
-def add_title_band(header, titulo, ementa):
-    """Adiciona, ao final do cabecalho ja existente, a faixa azul com
-    titulo + ementa -- sem remover nada que ja estava no cabecalho original."""
-    p1 = header.add_paragraph()
-    p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p1.paragraph_format.space_before = Pt(4)
-    p1.paragraph_format.space_after = Pt(2)
-    shade_paragraph(p1, AZUL_FAIXA)
-    r1 = p1.add_run(titulo)
-    r1.bold = True
-    r1.font.size = Pt(12)
-    r1.font.color.rgb = BRANCO
+def extract_header_image(header):
+    """Pega os bytes da imagem do banner ja embutida no cabecalho original."""
+    for rel in header.part.rels.values():
+        if "image" in rel.reltype:
+            return rel.target_part.blob
+    return None
 
-    p2 = header.add_paragraph()
-    p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p2.paragraph_format.space_after = Pt(4)
-    shade_paragraph(p2, AZUL_FAIXA)
-    r2 = p2.add_run(ementa)
-    r2.font.size = Pt(9)
-    r2.font.color.rgb = BRANCO
+
+def remove_image_paragraphs(header):
+    """Remove do cabecalho os paragrafos que contem a imagem/divisoria,
+    mantendo a linha de credito do topo intacta."""
+    for p in list(header.paragraphs):
+        if p._p.findall(qn("w:r") + "/" + qn("w:drawing")) or p.text.strip().startswith("___"):
+            p._p.getparent().remove(p._p)
+        elif any(run._r.find(qn("w:drawing")) is not None for run in p.runs):
+            p._p.getparent().remove(p._p)
+
+
+def add_title_band(header, titulo, ementa, image_bytes):
+    """Substitui o paragrafo da imagem por uma tabela com a imagem a
+    esquerda e o titulo/ementa a direita, igual a arte do template."""
+    remove_image_paragraphs(header)
+
+    table = header.add_table(rows=1, cols=2, width=Cm(17))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    left_cell, right_cell = table.rows[0].cells
+    left_cell.width = Cm(6)
+    right_cell.width = Cm(11)
+
+    left_p = left_cell.paragraphs[0]
+    left_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if image_bytes:
+        run = left_p.add_run()
+        run.add_picture(io.BytesIO(image_bytes), width=Cm(5.8))
+
+    rp1 = right_cell.paragraphs[0]
+    rp1.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r1 = rp1.add_run(titulo)
+    r1.bold = True
+    r1.font.size = Pt(13)
+    r1.font.color.rgb = AZUL_TITULO
+
+    rp2 = right_cell.add_paragraph()
+    rp2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
+    r2 = rp2.add_run(ementa)
+    r2.bold = True
+    r2.font.size = Pt(10)
+    r2.font.color.rgb = AZUL_TITULO
 
 
 def clear_body(doc):
@@ -138,7 +168,8 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
     original_paragraph_texts = all_texts
 
     header = doc.sections[0].header
-    add_title_band(header, titulo, subtitulo)
+    image_bytes = extract_header_image(header)
+    add_title_band(header, titulo, subtitulo, image_bytes)
 
     gabarito = extract_gabarito(original_paragraph_texts)
 
