@@ -18,7 +18,7 @@ import os
 import re
 from docx import Document
 from docx.shared import Pt, Cm, Emu, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_TAB_ALIGNMENT
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -92,49 +92,52 @@ def clear_container_paragraphs(container):
         container.add_paragraph()
 
 
+def add_tab(paragraph):
+    run = paragraph.add_run()
+    run._r.append(OxmlElement("w:tab"))
+    return run
+
+
 def add_credit_band(container):
-    """Cria a barra azul de credito (texto + icones) usada no topo do
-    cabecalho e no rodape -- mesma arte nos dois lugares."""
+    """Cria a barra azul de credito (texto + icones), usada no topo do
+    cabecalho e no rodape. Usa UM paragrafo so com parada de tabulacao
+    a direita -- e assim que o Word monta esse tipo de linha nativamente,
+    evita o problema de tabela "solta" sem paragrafo depois dela."""
     clear_container_paragraphs(container)
 
-    table = container.add_table(rows=1, cols=2, width=Cm(17))
-    table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    table.autofit = False
-    left_cell, right_cell = table.rows[0].cells
-    left_cell.width = Cm(9)
-    right_cell.width = Cm(8)
+    p = container.paragraphs[0]
+    shade_paragraph(p, AZUL_FAIXA)
+    p.paragraph_format.space_before = Pt(3)
+    p.paragraph_format.space_after = Pt(3)
+    p.paragraph_format.tab_stops.add_tab_stop(Cm(17), WD_TAB_ALIGNMENT.RIGHT)
 
-    for cell in (left_cell, right_cell):
-        shade_paragraph(cell.paragraphs[0], AZUL_FAIXA)
-        cell.paragraphs[0].paragraph_format.space_before = Pt(3)
-        cell.paragraphs[0].paragraph_format.space_after = Pt(3)
-
-    lp = left_cell.paragraphs[0]
-    lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
-    lr = lp.add_run(CREDITO_ESQ)
-    lr.bold = True
-    lr.font.size = Pt(9)
-    lr.font.color.rgb = BRANCO
-
-    rp = right_cell.paragraphs[0]
-    rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
-    r1 = rp.add_run(CREDITO_DIR_PRE)
+    r1 = p.add_run(CREDITO_ESQ)
     r1.bold = True
     r1.font.size = Pt(9)
     r1.font.color.rgb = BRANCO
 
-    if os.path.exists(ICON_WHATSAPP):
-        r1.add_picture(ICON_WHATSAPP, height=Cm(0.35))
-    r2 = rp.add_run(" | ")
+    add_tab(p)
+
+    r2 = p.add_run(CREDITO_DIR_PRE)
     r2.bold = True
     r2.font.size = Pt(9)
     r2.font.color.rgb = BRANCO
-    if os.path.exists(ICON_INSTAGRAM):
-        r2.add_picture(ICON_INSTAGRAM, height=Cm(0.35))
-    r3 = rp.add_run(CREDITO_DIR_POS)
+
+    if os.path.exists(ICON_WHATSAPP):
+        r2.add_picture(ICON_WHATSAPP, height=Cm(0.35))
+
+    r3 = p.add_run(" | ")
     r3.bold = True
     r3.font.size = Pt(9)
     r3.font.color.rgb = BRANCO
+
+    if os.path.exists(ICON_INSTAGRAM):
+        r3.add_picture(ICON_INSTAGRAM, height=Cm(0.35))
+
+    r4 = p.add_run(CREDITO_DIR_POS)
+    r4.bold = True
+    r4.font.size = Pt(9)
+    r4.font.color.rgb = BRANCO
 
 
 def add_title_band(header, titulo, ementa, image_bytes):
@@ -166,6 +169,10 @@ def add_title_band(header, titulo, ementa, image_bytes):
     r2.bold = True
     r2.font.size = Pt(10)
     r2.font.color.rgb = AZUL_TITULO
+
+    # Word exige um paragrafo "normal" apos a ultima tabela em header/footer,
+    # senao esse bloco nao e reconhecido como cabecalho nativo.
+    header.add_paragraph()
 
 
 def clear_body(doc):
