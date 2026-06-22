@@ -14,6 +14,7 @@ documento com:
 """
 
 import io
+import os
 import re
 from docx import Document
 from docx.shared import Pt, Cm, Emu, RGBColor
@@ -24,8 +25,16 @@ from docx.oxml import OxmlElement
 
 AZUL = RGBColor(0x1F, 0x3B, 0x57)
 AZUL_TITULO = RGBColor(0x12, 0x3D, 0x6B)
+AZUL_FAIXA = "1C5FA8"   # cor da barra de credito (ajustavel)
 CINZA = RGBColor(0x44, 0x44, 0x44)
 BRANCO = RGBColor(0xFF, 0xFF, 0xFF)
+
+ASSETS_DIR = os.path.join(os.path.dirname(__file__), "assets")
+ICON_WHATSAPP = os.path.join(ASSETS_DIR, "whatsapp.png")
+ICON_INSTAGRAM = os.path.join(ASSETS_DIR, "instagram.png")
+CREDITO_ESQ = "O Concursado de hoje é o Concurseiro que nunca desistiu!"
+CREDITO_DIR_PRE = "Lista de transmissão do whatsapp "
+CREDITO_DIR_POS = " @professorfrancelino"
 
 QUESTAO_RE = re.compile(r"^Quest(?:ã|a)o\s+(\d+)\b\s*(.*)$", re.IGNORECASE)
 ALT_RE = re.compile(r"^([A-E])\)\s*(.*)$")
@@ -72,11 +81,65 @@ def remove_image_paragraphs(header):
             p._p.getparent().remove(p._p)
 
 
-def add_title_band(header, titulo, ementa, image_bytes):
-    """Substitui o paragrafo da imagem por uma tabela com a imagem a
-    esquerda e o titulo/ementa a direita, igual a arte do template."""
-    remove_image_paragraphs(header)
+def clear_container_paragraphs(container):
+    """Remove TODOS os paragrafos/tabelas de um header ou footer."""
+    body = container._element
+    for child in list(body):
+        if child.tag in (qn("w:p"), qn("w:tbl")):
+            body.remove(child)
+    # garante que sempre exista pelo menos 1 paragrafo (exigencia do formato)
+    if not container.paragraphs:
+        container.add_paragraph()
 
+
+def add_credit_band(container):
+    """Cria a barra azul de credito (texto + icones) usada no topo do
+    cabecalho e no rodape -- mesma arte nos dois lugares."""
+    clear_container_paragraphs(container)
+
+    table = container.add_table(rows=1, cols=2, width=Cm(17))
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    table.autofit = False
+    left_cell, right_cell = table.rows[0].cells
+    left_cell.width = Cm(9)
+    right_cell.width = Cm(8)
+
+    for cell in (left_cell, right_cell):
+        shade_paragraph(cell.paragraphs[0], AZUL_FAIXA)
+        cell.paragraphs[0].paragraph_format.space_before = Pt(3)
+        cell.paragraphs[0].paragraph_format.space_after = Pt(3)
+
+    lp = left_cell.paragraphs[0]
+    lp.alignment = WD_ALIGN_PARAGRAPH.LEFT
+    lr = lp.add_run(CREDITO_ESQ)
+    lr.bold = True
+    lr.font.size = Pt(9)
+    lr.font.color.rgb = BRANCO
+
+    rp = right_cell.paragraphs[0]
+    rp.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+    r1 = rp.add_run(CREDITO_DIR_PRE)
+    r1.bold = True
+    r1.font.size = Pt(9)
+    r1.font.color.rgb = BRANCO
+
+    if os.path.exists(ICON_WHATSAPP):
+        r1.add_picture(ICON_WHATSAPP, height=Cm(0.35))
+    r2 = rp.add_run(" | ")
+    r2.bold = True
+    r2.font.size = Pt(9)
+    r2.font.color.rgb = BRANCO
+    if os.path.exists(ICON_INSTAGRAM):
+        r2.add_picture(ICON_INSTAGRAM, height=Cm(0.35))
+    r3 = rp.add_run(CREDITO_DIR_POS)
+    r3.bold = True
+    r3.font.size = Pt(9)
+    r3.font.color.rgb = BRANCO
+
+
+def add_title_band(header, titulo, ementa, image_bytes):
+    """Adiciona uma tabela com a imagem do banner a esquerda e o
+    titulo/ementa a direita, igual a arte do template."""
     table = header.add_table(rows=1, cols=2, width=Cm(17))
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
     table.autofit = False
@@ -168,8 +231,12 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
     original_paragraph_texts = all_texts
 
     header = doc.sections[0].header
+    footer = doc.sections[0].footer
     image_bytes = extract_header_image(header)
+
+    add_credit_band(header)
     add_title_band(header, titulo, subtitulo, image_bytes)
+    add_credit_band(footer)
 
     gabarito = extract_gabarito(original_paragraph_texts)
 
