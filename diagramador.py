@@ -55,6 +55,21 @@ GABARITO_DIVIDER_RE = re.compile(r"^[━_\-\s]*GABARITO[━_\-\s]*$", re.IGNOREC
 ALT_SPLIT_RE = re.compile(r"\s(?=[A-E]\)\s)")
 
 
+WHITESPACE_RE = re.compile(r"[\t\n\r\v\f]+")
+MULTISPACE_RE = re.compile(r" {2,}")
+
+
+def normalize_text(text):
+    """Remove tabs/quebras de linha embutidas no meio do texto (herdadas
+    do arquivo cru) e colapsa espacos duplicados. Sem isso, um caractere
+    de quebra "\\n" sobrevive dentro do run e o Word o renderiza como se
+    fosse uma quebra manual (Shift+Enter), mesmo que no nosso codigo a
+    gente so tenha criado paragrafos de verdade."""
+    text = WHITESPACE_RE.sub(" ", text)
+    text = MULTISPACE_RE.sub(" ", text)
+    return text.strip()
+
+
 def format_paragraph(p, justify=True, space_before=None, space_after=4):
     pf = p.paragraph_format
     pf.line_spacing_rule = WD_LINE_SPACING.MULTIPLE
@@ -340,7 +355,7 @@ def diagramar(input_stream, titulo=None, subtitulo=None):
     conteudo do arquivo cru."""
     raw = Document(input_stream)
 
-    all_texts = [p.text.strip() for p in raw.paragraphs]
+    all_texts = [normalize_text(p.text) for p in raw.paragraphs]
     non_empty = [t for t in all_texts if t]
     titulo = titulo or (non_empty[0] if len(non_empty) > 0 else "")
     subtitulo = subtitulo or (non_empty[1] if len(non_empty) > 1 else "")
