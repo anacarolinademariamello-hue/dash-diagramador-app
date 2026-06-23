@@ -21,7 +21,7 @@ import os
 import re
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_BREAK, WD_LINE_SPACING
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
@@ -224,13 +224,14 @@ def start_revisao_box(doc, titulo_box):
 
 
 def add_question_paragraph(container, numero, enunciado):
-    np = add_body_paragraph(container, space_before=12, space_after=4)
-    r1 = np.add_run(f"Questão {numero}")
+    titulo_p = add_body_paragraph(container, space_before=12, space_after=0, justify=False)
+    r1 = titulo_p.add_run(f"Questão {numero}")
     style_run(r1, bold=True)
-    r1.add_break(WD_BREAK.LINE)
-    r2 = np.add_run(enunciado)
+
+    enunciado_p = add_body_paragraph(container, space_before=None, space_after=4)
+    r2 = enunciado_p.add_run(enunciado)
     style_run(r2)
-    return np
+    return enunciado_p
 
 
 def add_alternativa_paragraph(container, letra, texto):
